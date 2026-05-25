@@ -61,7 +61,7 @@ class ReaxModule(reax.Module[jraph.GraphsTuple, jraph.GraphsTuple]):
         self._loss_fn = loss_fn
         self._optimizer = optimizer
         self._scheduler = scheduler
-        self._debug = False
+        self._debug = True
         if jit:
             if donate_graph:
                 self.step = eqx.filter_jit(donate="all-except-first")(self.step)
@@ -314,7 +314,7 @@ class ReaxModule(reax.Module[jraph.GraphsTuple, jraph.GraphsTuple]):
     def on_before_optimizer_step(self, _optimizer: reax.Optimizer, grad: dict[str, Any], /):
         # Compute the 2-norm for each layer
         # If using mixed precision, the gradients are already unscaled here
-        if self.debug and self.trainer.current_epoch % 25 == 0:
+        if self.debug and self.trainer.current_epoch % 1 == 0:
             norms = reax.utils.grad_norm(grad, norm_type=2)
             self.log_dict(norms, on_step=False, on_epoch=True, logger=True, prog_bar=False)
 

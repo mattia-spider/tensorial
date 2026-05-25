@@ -18,7 +18,7 @@ from .. import base
 if TYPE_CHECKING:
     from tensorial import gcnn
 
-__all__ = "PureLossFn", "GraphLoss", "WeightedLoss", "Loss"
+__all__ = "PureLossFn", "GraphLoss", "WeightedLoss", "Loss", "L2Regularization"
 
 # A pure loss function that doesn't know about graphs, just takes arrays and produces a loss array
 PureLossFn = Callable[[jax.Array, jax.Array], jax.Array]
@@ -46,6 +46,26 @@ class GraphLoss(equinox.Module):
     def _call(self, predictions: jraph.GraphsTuple, targets: jraph.GraphsTuple) -> jax.Array:
         """Return the scalar loss between predictions and targets"""
 
+class L2Regularization(GraphLoss):
+    """L2 regularization loss on chosen predicted target on nodes"""
+    
+    _prediction_field: "gcnn.typing.TreePath"
+    
+    def __init__(self, prediction_field: str):
+        self._prediction_field = utils.path_from_str(prediction_field)
+        super().__init__(label=prediction_field)
+    
+    def _call(self, predictions: jraph.GraphsTuple, targets: jraph.GraphsTuple) -> jax.Array:
+        pred_values = base.as_array(tree.get_by_path(predictions._asdict(), self._prediction_field))
+        loss = jnp.sum(pred_values ** 2, axis=-1)
+        
+        graph_mask = targets.globals.get(keys.MASK)
+        segments = targets.n_node
+        
+        loss = graph_ops.segment_reduce(loss, segments, reduction="mean", segment_mask=graph_mask)
+        loss = graph_ops.segment_reduce(loss, jnp.array([loss.shape[0]]), reduction="mean", mask=graph_mask)
+        
+        return jnp.mean(loss)
 
 class Loss(GraphLoss):
     """Simple loss function that passes values from the graph to a function taking numerical values
@@ -143,7 +163,6 @@ class Loss(GraphLoss):
         loss = jnp.mean(loss)
 
         return loss
-
 
 class WeightedLoss(GraphLoss):
     _weights: tuple[float, ...]
