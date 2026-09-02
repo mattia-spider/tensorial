@@ -25,6 +25,28 @@ def infer_backend(pytree) -> types.ModuleType:
     return jnp
 
 
+def hidden_irreps(mul: int, lmax: int) -> str:
+    r"""Build the irreps string for a stack of hidden features.
+
+    Contains ``mul`` copies of every irrep up to (and including) ``lmax``, in both parities, odd
+    before even, e.g. ``hidden_irreps(8, 2)`` gives
+    ``"8x0o + 8x0e + 8x1o + 8x1e + 8x2o + 8x2e"``.
+
+    Args:
+        mul: the multiplicity (number of channels) of each irrep
+        lmax: the maximum rotation order to include
+
+    Returns:
+        the irreps as a string, suitable for passing to :class:`e3nn_jax.Irreps`
+    """
+    if mul < 0:
+        raise ValueError(f"'mul' must be non-negative, got {mul}")
+    if lmax < 0:
+        raise ValueError(f"'lmax' must be non-negative, got {lmax}")
+
+    return " + ".join(f"{mul}x{ell}{parity}" for ell in range(lmax + 1) for parity in ("o", "e"))
+
+
 def zeros(
     irreps: IntoIrreps, leading_shape: tuple = (), dtype: jnp.dtype = None, np_=jnp
 ) -> e3j.IrrepsArray:

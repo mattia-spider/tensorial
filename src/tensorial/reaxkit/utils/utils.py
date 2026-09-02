@@ -122,10 +122,12 @@ def get_metric_value(metric_dict: dict[str, Any], metric_name: str | None) -> fl
         raise ValueError(
             f"Metric value not found! <metric_name={metric_name}>\n"
             "Make sure metric name logged in reax.Module is correct!\n"
-            "Make sure `optimized_metric` name in `hparams_search` config is correct!"
+            "Make sure `optimized_metric` name in `hparams_search` config is correct!\n"
+            f"Available metrics are: {', '.join(sorted(metric_dict))}"
         )
 
-    metric_value = metric_dict[metric_name].item()
+    # Sweepers (e.g. Optuna) need a plain python float back, not a jax/numpy scalar
+    metric_value = float(metric_dict[metric_name].item())
     _LOGGER.info("Retrieved metric value! <%s=%f>", metric_name, metric_value)
 
     return metric_value

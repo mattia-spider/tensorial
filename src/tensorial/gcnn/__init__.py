@@ -1,5 +1,6 @@
 from . import (
     _base,
+    _builders,
     _common,
     _diff,
     _edgewise,
@@ -21,6 +22,7 @@ from . import (
     utils,
 )
 from ._base import *
+from ._builders import *
 from ._common import *
 from ._diff import *
 from ._edgewise import *
@@ -35,6 +37,7 @@ from .typing import *
 
 __all__ = (
     _base.__all__
+    + _builders.__all__
     + _common.__all__
     + _diff.__all__
     + _nequip.__all__
