@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 import math
-from typing import TYPE_CHECKING, ClassVar, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Final, Literal, Optional, TypeVar
 
 import beartype
 import jax.numpy as jnp
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 OutT = TypeVar("OutT")
 
-__all__ = "GraphMetric", "graph_metric", "AvgNumNeighboursByType"
+__all__ = "GraphMetric", "graph_metric", "species_metric", "AvgNumNeighboursByType"
 
 
 @jt.jaxtyped(typechecker=beartype.beartype)
@@ -44,6 +44,80 @@ def graph_metric(
         normalise_by = norm_by
 
     return _GraphMetric()
+
+
+# Written into `nodes` on the fly so that `GraphMetric` can find it by path, the same way it
+# finds the padding mask
+_SPECIES_MASK: Final[str] = "_species_mask"
+
+
+def _with_species_mask(
+    graph: jraph.GraphsTuple, species_path, species_index: int
+) -> jraph.GraphsTuple:
+    """Return ``graph`` with a boolean node mask selecting only ``species_index``."""
+    species = jnp.asarray(tree.get_by_path(graph._asdict(), species_path)).reshape(-1)
+    mask = species == species_index
+
+    # Respect any padding mask that is already there, otherwise padded nodes get counted
+    padding = graph.nodes.get("mask")
+    if padding is not None:
+        mask = jnp.logical_and(mask, jnp.asarray(padding).reshape(-1))
+
+    nodes = dict(graph.nodes)
+    nodes[_SPECIES_MASK] = mask
+    return graph._replace(nodes=nodes)
+
+
+@jt.jaxtyped(typechecker=beartype.beartype)
+def species_metric(
+    metric: str | reax.Metric | type[reax.Metric],
+    predictions: "gcnn.typing.TreePathLike",
+    species: int,
+    targets: "Optional[gcnn.TreePathLike]" = None,
+    atomic_numbers: Sequence[int] | None = None,
+    species_field: "Optional[gcnn.TreePathLike]" = None,
+    normalise_by: "Optional[gcnn.TreePathLike]" = None,
+) -> "GraphMetric":
+    """Evaluate ``metric`` over the nodes of a single species.
+
+    Behaves like :func:`graph_metric`, but restricts the reduction to the nodes whose species
+    matches, which is what separates e.g. a per element RMSE from the aggregate one.
+
+    :param species: the species to select.  Together with ``atomic_numbers`` this is an atomic
+        number (1 for hydrogen), otherwise it is the index used by
+        :class:`~tensorial.gcnn.atomic.SpeciesTransform`.
+    :param atomic_numbers: the type map the model was built with, used to turn an atomic number
+        into a species index.
+    """
+    if atomic_numbers is not None:
+        atomic_numbers = list(atomic_numbers)
+        if species not in atomic_numbers:
+            raise ValueError(f"species {species} is not in the type map {atomic_numbers}")
+        species_index = atomic_numbers.index(species)
+    else:
+        species_index = species
+
+    predictions_from = _tree.path_from_str(predictions)
+    targets_from = _tree.path_to_str(targets) if targets is not None else None
+    norm_by = _tree.path_to_str(normalise_by) if normalise_by is not None else None
+    species_from = _tree.path_from_str(
+        species_field if species_field is not None else f"nodes.{keys.SPECIES}"
+    )
+
+    class _SpeciesMetric(GraphMetric):
+        parent = reax.metrics.get(metric)
+        pred_key = predictions_from
+        target_key = targets_from
+        mask_key = _tree.path_to_str(f"nodes.{_SPECIES_MASK}")
+        normalise_by = norm_by
+
+        @override
+        def create(self, predictions, targets=None):  # pylint: disable=arguments-differ
+            return super().create(
+                _with_species_mask(predictions, species_from, species_index), targets
+            )
+
+    return _SpeciesMetric()
 
 
 def mdiv(
