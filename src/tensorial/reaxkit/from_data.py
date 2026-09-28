@@ -20,7 +20,33 @@ from typing_extensions import override
 
 DONE_KEY = "done"
 
-__all__ = ("FromData",)
+__all__ = ("FromData", "StepsPerEpoch")
+
+
+class StepsPerEpoch(reax.Metric[int]):
+    """Count the batches in a single pass over a dataloader.
+
+    Used as a ``from_data`` entry this gives the number of optimiser steps in one epoch, which
+    is what :func:`optax.contrib.reduce_on_plateau` wants for its ``accumulation_size``: the
+    value it is handed each update is the loss on the *current minibatch*, so without
+    aggregating an epoch's worth it judges a plateau from a single noisy batch and winds the
+    scale down to ``min_scale``.  Deriving the number here keeps ``patience`` and ``cooldown``
+    counted in epochs whatever the batch size or the size of the dataset.
+    """
+
+    count: int = 0
+
+    def empty(self) -> "StepsPerEpoch":
+        return type(self)(count=0)
+
+    def create(self, *_args, **_kwargs) -> "StepsPerEpoch":
+        return type(self)(count=1)
+
+    def merge(self, other: "StepsPerEpoch") -> "StepsPerEpoch":
+        return type(self)(count=self.count + other.count)
+
+    def compute(self) -> int:
+        return self.count
 
 
 class FromData(reax.stages.Stage):
