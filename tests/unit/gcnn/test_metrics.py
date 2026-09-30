@@ -324,3 +324,44 @@ def test_avg_num_neighbours_by_type_compute_empty_raises():
 
     with pytest.raises(RuntimeError):
         metric.compute()  # pylint: disable=not-callable
+
+
+def test_species_metrics():
+    # Type map H, C, O -> species indices 0, 1, 2
+    atomic_numbers = [1, 6, 8]
+    species = np.array([0, 1, 1, 2, 0, 2, 1])
+    targets = np.random.random((len(species), 3))
+    preds = np.random.random((len(species), 3))
+    graphs = jraph.GraphsTuple(
+        n_node=jnp.array([len(species)]),
+        n_edge=jnp.zeros(1, dtype=int),
+        nodes={keys.SPECIES: species, "target": targets, "pred": preds},
+        edges={},
+        globals={},
+        senders=jnp.array([], dtype=int),
+        receivers=jnp.array([], dtype=int),
+    )
+
+    metrics = gcnn.metrics.species_metrics(
+        "rmse", predictions="nodes.pred", targets="nodes.target", atomic_numbers=atomic_numbers
+    )
+    assert list(metrics) == ["H", "C", "O"]
+    for idx, metric in enumerate(metrics.values()):
+        sel = species == idx
+        reference = np.sqrt(((preds[sel] - targets[sel]) ** 2).mean())
+        assert np.isclose(metric.create(graphs).compute(), reference)
+
+    subset = gcnn.metrics.species_metrics(
+        "rmse", "nodes.pred", jnp.asarray(atomic_numbers), "nodes.target", species=[8]
+    )
+    assert list(subset) == ["O"]
+
+
+def test_reax_module_flattens_metric_groups():
+    from tensorial.reaxkit import _module
+
+    flat = _module._flatten({"energy_rmse": "rmse", "nmr_rmse": {"H": "rmse", "C": "mae"}})
+    assert flat == {"energy_rmse": "rmse", "nmr_rmse_H": "rmse", "nmr_rmse_C": "mae"}
+
+    with pytest.raises(ValueError):
+        _module._flatten({"a_b": "rmse", "a": {"b": "mae"}})

@@ -20,7 +20,13 @@ if TYPE_CHECKING:
 
 OutT = TypeVar("OutT")
 
-__all__ = "GraphMetric", "graph_metric", "species_metric", "AvgNumNeighboursByType"
+__all__ = (
+    "GraphMetric",
+    "graph_metric",
+    "species_metric",
+    "species_metrics",
+    "AvgNumNeighboursByType",
+)
 
 
 @jt.jaxtyped(typechecker=beartype.beartype)
@@ -118,6 +124,55 @@ def species_metric(
             )
 
     return _SpeciesMetric()
+
+
+def _species_label(atomic_number: int) -> str:
+    try:
+        from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return f"Z{atomic_number}"
+
+    if 0 < atomic_number < len(chemical_symbols):
+        return chemical_symbols[atomic_number]
+    return f"Z{atomic_number}"
+
+
+@jt.jaxtyped(typechecker=beartype.beartype)
+def species_metrics(
+    metric: str | reax.Metric | type[reax.Metric],
+    predictions: "gcnn.typing.TreePathLike",
+    atomic_numbers: Sequence[int] | jax.Array,
+    targets: "Optional[gcnn.TreePathLike]" = None,
+    species: Sequence[int] | None = None,
+    species_field: "Optional[gcnn.TreePathLike]" = None,
+    normalise_by: "Optional[gcnn.TreePathLike]" = None,
+) -> dict[str, "GraphMetric"]:
+    """Build a :func:`species_metric` for every species in the type map.
+
+    Meant to be fed the type map gathered from the data (``${from_data.atomic_numbers}``), so
+    the per element metrics follow the dataset instead of being listed by hand.  The result is
+    keyed by element symbol, and :class:`~tensorial.reaxkit.ReaxModule` flattens it into
+    ``<name>_<symbol>`` entries, e.g. ``nmr_rmse: {H: ..., C: ...}`` is logged as
+    ``nmr_rmse_H``, ``nmr_rmse_C``.
+
+    :param atomic_numbers: the type map the model was built with.
+    :param species: restrict to these atomic numbers, all of ``atomic_numbers`` if ``None``.
+    """
+    atomic_numbers = [int(z) for z in jnp.asarray(atomic_numbers).reshape(-1).tolist()]
+    selected = atomic_numbers if species is None else [int(z) for z in species]
+
+    return {
+        _species_label(z): species_metric(
+            metric,
+            predictions,
+            species=z,
+            targets=targets,
+            atomic_numbers=atomic_numbers,
+            species_field=species_field,
+            normalise_by=normalise_by,
+        )
+        for z in selected
+    }
 
 
 def mdiv(

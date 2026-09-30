@@ -19,7 +19,8 @@ __all__ = ("ReaxModule",)
 OutputT_co = TypeVar("OutputT_co", covariant=True)
 InputT = TypeVar("InputT")
 
-MetricsDict = dict[str, reax.Metric | str]
+# A nested dict is a group of metrics (e.g. from `gcnn.species_metrics`) that gets flattened
+MetricsDict = dict[str, reax.Metric | str | dict]
 LossFn = Callable[[OutputT_co, InputT], jax.Array]
 Optimizer = optax.GradientTransformation | Callable[[], optax.GradientTransformation]
 
@@ -69,7 +70,7 @@ class ReaxModule(reax.Module[InputT, OutputT_co]):
         super().__init__()
         # Params
         self._metrics: Final[reax.metrics.MetricCollection | None] = (
-            metrics if metrics is None else reax.metrics.build_collection(metrics)
+            metrics if metrics is None else reax.metrics.build_collection(_flatten(metrics))
         )
         self._output: Final[tuple[str, ...]] = self._init_output(output)
         self._loss_fn: Final[LossFn] = loss_fn
@@ -374,3 +375,16 @@ def _get_batch_size(inputs: InputT):
         mask = _graph_padding.get_graph_padding_mask(inputs)
 
     return mask.sum()
+
+
+def _flatten(metrics: MetricsDict, prefix: str = "") -> dict[str, reax.Metric | str]:
+    """Flatten nested metric groups into ``<group>_<name>`` entries."""
+    flat: dict[str, reax.Metric | str] = {}
+    for name, metric in metrics.items():
+        key = f"{prefix}_{name}" if prefix else name
+        entries = _flatten(metric, key) if isinstance(metric, dict) else {key: metric}
+        for entry_key, entry in entries.items():
+            if entry_key in flat:
+                raise ValueError(f"Duplicate metric name '{entry_key}' after flattening")
+            flat[entry_key] = entry
+    return flat
