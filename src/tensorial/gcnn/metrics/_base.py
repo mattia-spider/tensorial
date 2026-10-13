@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 import math
-from typing import TYPE_CHECKING, ClassVar, Final, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Final, Optional, TypeVar, cast
 
 import beartype
 import jax.numpy as jnp
@@ -12,10 +12,12 @@ from pytray import tree
 import reax
 from typing_extensions import override
 
-from .. import _tree, keys
 from ... import nn_utils
+from .. import _tree, keys
 
 if TYPE_CHECKING:
+    from typing import Literal
+
     from tensorial import gcnn
 
 OutT = TypeVar("OutT")
@@ -33,9 +35,9 @@ __all__ = (
 def graph_metric(
     metric: str | reax.Metric | type[reax.Metric],
     predictions: "gcnn.typing.TreePathLike",
-    targets: "Optional[gcnn.TreePathLike]" = None,
-    mask: "Optional[gcnn.TreePathLike | Literal['auto']]" = "auto",
-    normalise_by: "Optional[gcnn.TreePathLike]" = None,
+    targets: "gcnn.TreePathLike | None" = None,
+    mask: "gcnn.TreePathLike | Literal['auto'] | None" = "auto",
+    normalise_by: "gcnn.TreePathLike | None" = None,
 ) -> "GraphMetric":
     predictions_from = _tree.path_from_str(predictions)
     targets_from = _tree.path_to_str(targets) if targets is not None else None
@@ -79,10 +81,10 @@ def species_metric(
     metric: str | reax.Metric | type[reax.Metric],
     predictions: "gcnn.typing.TreePathLike",
     species: int,
-    targets: "Optional[gcnn.TreePathLike]" = None,
+    targets: "gcnn.TreePathLike | None" = None,
     atomic_numbers: Sequence[int] | None = None,
-    species_field: "Optional[gcnn.TreePathLike]" = None,
-    normalise_by: "Optional[gcnn.TreePathLike]" = None,
+    species_field: "gcnn.TreePathLike | None" = None,
+    normalise_by: "gcnn.TreePathLike | None" = None,
 ) -> "GraphMetric":
     """Evaluate ``metric`` over the nodes of a single species.
 
@@ -142,10 +144,10 @@ def species_metrics(
     metric: str | reax.Metric | type[reax.Metric],
     predictions: "gcnn.typing.TreePathLike",
     atomic_numbers: Sequence[int] | jax.Array,
-    targets: "Optional[gcnn.TreePathLike]" = None,
+    targets: "gcnn.TreePathLike | None" = None,
     species: Sequence[int] | None = None,
-    species_field: "Optional[gcnn.TreePathLike]" = None,
-    normalise_by: "Optional[gcnn.TreePathLike]" = None,
+    species_field: "gcnn.TreePathLike | None" = None,
+    normalise_by: "gcnn.TreePathLike | None" = None,
 ) -> dict[str, "GraphMetric"]:
     """Build a :func:`species_metric` for every species in the type map.
 
@@ -176,7 +178,9 @@ def species_metrics(
 
 
 def mdiv(
-    num: jax.typing.ArrayLike, denom: jax.typing.ArrayLike, where: jax.typing.ArrayLike = None
+    num: jax.typing.ArrayLike,
+    denom: jax.typing.ArrayLike,
+    where: jax.typing.ArrayLike | None = None,
 ):
     """Divide that supports supplying a mask, where `False` values will just return the numerator"""
     # Use prod here because `IrrepsArray` doesn't have `.size`
@@ -194,9 +198,9 @@ def mdiv(
 class GraphMetric(reax.Metric):
     parent: ClassVar[reax.Metric]
     pred_key: "ClassVar[gcnn.typing.TreePathLike]"
-    target_key: "ClassVar[Optional[gcnn.typing.TreePathLike]]" = None
-    mask_key: "ClassVar[Optional[gcnn.typing.TreePathLike]]" = "auto"
-    normalise_by: "ClassVar[Optional[gcnn.typing.TreePathLike]]" = None
+    target_key: "ClassVar[gcnn.typing.TreePathLike | None]" = None
+    mask_key: "ClassVar[gcnn.typing.TreePathLike | None]" = "auto"
+    normalise_by: "ClassVar[gcnn.typing.TreePathLike | None]" = None
 
     _state: reax.Metric[OutT] | None
 
@@ -343,7 +347,8 @@ class AvgNumNeighboursByType(reax.Metric[dict[int, jax.Array]]):
             state=[
                 avg.merge(other_avg)
                 for avg, other_avg in zip(
-                    self._state, other._state  # pylint: disable=protected-access
+                    self._state,
+                    other._state,  # pylint: disable=protected-access
                 )
             ],
         )
@@ -385,7 +390,8 @@ class AvgNumNeighboursByType(reax.Metric[dict[int, jax.Array]]):
         types = nn_utils.vwhere(types, self._node_types)
 
         counts = jnp.bincount(graphs.senders, length=jnp.sum(graphs.n_node).item())
-        mask = reax.metrics.utils.prepare_mask(counts, graphs.nodes.get(keys.MASK))
+        nodes = cast("dict[str, Any]", graphs.nodes)
+        mask = reax.metrics.utils.prepare_mask(counts, nodes.get(keys.MASK))
         mask = mask if mask is not None else True
 
         num_classes = len(self._node_types)

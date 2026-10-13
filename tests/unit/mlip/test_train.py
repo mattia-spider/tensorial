@@ -1,0 +1,31 @@
+import pathlib
+
+import hydra
+from hydra.core import hydra_config
+
+import tensorial.reaxkit as rkit
+
+
+def test_train_simple(
+    train_simple_mlip_config: pathlib.Path,
+    mlip_si_data: pathlib.Path,
+    tmpdir: pathlib.Path,
+):
+    with hydra.initialize(
+        config_path=train_simple_mlip_config.parent.name,
+        job_name="test_app",
+    ):
+        cfg = hydra.compose(config_name=train_simple_mlip_config.name, return_hydra_config=True)
+
+        # Manually set the runtime fields if needed
+        cfg.hydra.job.num = 0
+        cfg.hydra.runtime.output_dir = str(tmpdir)
+        cfg.hydra.runtime.cwd = str(pathlib.Path.cwd())
+
+        cfg.data.path = str(mlip_si_data)
+
+        hydra_config.HydraConfig().set_config(cfg)
+
+        rkit.train.train(cfg)
+
+        assert (tmpdir / "config.yaml").exists()

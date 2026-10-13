@@ -74,7 +74,7 @@ class ReaxModule(reax.Module[InputT, OutputT_co]):
         )
         self._output: Final[tuple[str, ...]] = self._init_output(output)
         self._loss_fn: Final[LossFn] = loss_fn
-        self._loss_reduction: "Final[reax.types.ReduceFn | None]" = loss_reduction
+        self._loss_reduction: Final[reax.types.ReduceFn | None] = loss_reduction
         self._model: Final[linen.Module] = model
 
         # State
@@ -370,7 +370,8 @@ def _get_batch_size(inputs: InputT):
         return None
 
     try:
-        mask = inputs.globals["mask"]
+        globals_dict = cast("dict[str, Any]", inputs.globals)
+        mask = globals_dict["mask"]
     except KeyError:
         mask = _graph_padding.get_graph_padding_mask(inputs)
 

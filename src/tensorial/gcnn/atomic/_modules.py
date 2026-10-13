@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from typing import cast
 
 import beartype
 import equinox
@@ -10,10 +11,10 @@ import jraph
 
 from tensorial.typing import Array
 
-from . import keys
+from ... import nn_utils
 from .. import _modules as gcnn_modules
 from .. import keys as gcnn_keys
-from ... import nn_utils
+from . import keys
 
 __all__ = "SpeciesTransform", "per_species_rescale"
 
@@ -40,10 +41,8 @@ class SpeciesTransform(equinox.Module):
         self.out_field = out_field
 
     @jt.jaxtyped(typechecker=beartype.beartype)
-    def __call__(
-        self, graph: jraph.GraphsTuple
-    ) -> jraph.GraphsTuple:  # pylint: disable=arguments-differ
-        nodes = graph.nodes
+    def __call__(self, graph: jraph.GraphsTuple) -> jraph.GraphsTuple:  # pylint: disable=arguments-differ
+        nodes = cast("dict[str, Any]", graph.nodes)
         nodes[self.out_field] = nn_utils.vwhere(nodes[self.field], self.atomic_numbers)
 
         return graph._replace(nodes=nodes)
@@ -53,10 +52,10 @@ def per_species_rescale(
     num_types: int,
     field: str,
     *,
-    types_field: str = None,
-    out_field: str = None,
-    shifts: jax.typing.ArrayLike = None,
-    scales: jax.typing.ArrayLike = None,
+    types_field: str | None = None,
+    out_field: str | None = None,
+    shifts: jax.typing.ArrayLike | None = None,
+    scales: jax.typing.ArrayLike | None = None,
 ) -> gcnn_modules.IndexedRescale:
     types_field = types_field or ("nodes", gcnn_keys.SPECIES)
     return gcnn_modules.IndexedRescale(

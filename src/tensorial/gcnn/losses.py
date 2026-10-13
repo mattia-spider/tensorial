@@ -7,7 +7,7 @@ for logging/monitoring.
 
 import abc
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Final, Literal, Optional
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 import beartype
 import equinox
@@ -20,8 +20,8 @@ import optax.losses
 from pytray import tree
 import reax
 
-from . import _tree, graph_ops, keys, typing, utils
 from .. import base
+from . import _tree, graph_ops, keys, typing, utils
 
 if TYPE_CHECKING:
     from tensorial import gcnn
@@ -58,7 +58,7 @@ class GraphLoss(equinox.Module):
         return "mean"
 
     def __call__(
-        self, predictions: jraph.GraphsTuple, targets: jraph.GraphsTuple = None
+        self, predictions: jraph.GraphsTuple, targets: jraph.GraphsTuple | None = None
     ) -> jax.Array:
         """Return the scalar loss between predictions and targets"""
         if targets is None:
@@ -78,7 +78,7 @@ class Loss(GraphLoss):
     _loss_fn: PureLossFn
     _target_field: "gcnn.typing.TreePath"
     _prediction_field: "gcnn.typing.TreePath"
-    _mask_field: "Optional[gcnn.typing.TreePath]"
+    _mask_field: "gcnn.typing.TreePath | None"
     _reduction: Literal["sum", "mean"]
 
     @jt.jaxtyped(typechecker=beartype.beartype)
@@ -89,7 +89,7 @@ class Loss(GraphLoss):
         predictions: str | None = None,
         *,
         reduction: Literal["sum", "mean"] = "mean",
-        label: str = None,
+        label: str | None = None,
         mask_field: str | None = None,
     ):
         """
@@ -154,7 +154,8 @@ class Loss(GraphLoss):
             else:
                 mask = mask & user_mask
 
-        graph_mask: Bool[jax.Array, "n_graph ..."] | None = targets.globals.get(keys.MASK)
+        globals_dict = cast("dict[str, Any]", targets.globals)
+        graph_mask: Bool[jax.Array, "n_graph ..."] | None = globals_dict.get(keys.MASK)
 
         root: str = self._target_field[0]
         if root in ("nodes", "edges"):

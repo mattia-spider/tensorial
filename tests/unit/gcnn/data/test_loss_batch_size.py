@@ -1,9 +1,11 @@
 import jax.numpy as jnp
 import pytest
+import reax
 from reax import results
 from reax.data import utils
 
 from tensorial import gcnn
+from tensorial.data import PassthroughFetcher
 
 
 @pytest.mark.parametrize("batch_mode", [gcnn.data.BatchMode.IMPLICIT, gcnn.data.BatchMode.EXPLICIT])
@@ -14,13 +16,14 @@ def test_batch_size_and_logged_loss(cube_graph, batch_mode):
     dset = [cube_graph for _ in range(dataset_size)]
 
     batch_size = 5
-    dm = gcnn.data.GraphDataModule(
-        dset,
+    dm = gcnn.data.GraphDataModule.from_random_split(
+        PassthroughFetcher(dset),
         train_val_test_split=(1.0, 0.0, 0.0),
         batch_size=batch_size,
         batch_mode=batch_mode,
     )
-    dm.setup(None)
+    dm.prepare_data()
+    dm.setup(reax.Engine(logger=False))
 
     loader = dm.train_dataloader()
     batches = tuple(loader)
@@ -57,6 +60,6 @@ def test_batch_size_and_logged_loss(cube_graph, batch_mode):
     # Each per-batch mean is weighted by the number of real graphs behind it, so a padded final
     # batch counts for the graphs it actually holds rather than as a whole batch
     expected_mean = (loss1 * batch_size1 + loss2 * batch_size2) / (batch_size1 + batch_size2)
-    assert jnp.isclose(
-        computed, expected_mean
-    ), f"Expected the mean over graphs {expected_mean}, but got {computed}"
+    assert jnp.isclose(computed, expected_mean), (
+        f"Expected the mean over graphs {expected_mean}, but got {computed}"
+    )
