@@ -274,8 +274,13 @@ class PropertyContributionLstsq(reax.Metric):
         Bool[Array, "batch_size"] | None,
     ]:
         graph_dict = graphs._asdict()
-        types = tree.get_by_path(graph_dict, (self._type_source,) + self._type_key)
-        values = tree.get_by_path(graph_dict, ("globals",) + self._property_key)
+        try:
+            types = tree.get_by_path(graph_dict, (self._type_source,) + self._type_key)
+            values = tree.get_by_path(graph_dict, ("globals",) + self._property_key)
+        except KeyError as exc:
+            # Lets `from_data` skip the statistic for a dataset without this property, as it
+            # does for the other statistics (`ignore_missing`)
+            raise reax.exceptions.DataNotFound(f"Missing key: {exc}") from None
 
         if self._type_map is None:
             num_classes = types.max().item() + 1

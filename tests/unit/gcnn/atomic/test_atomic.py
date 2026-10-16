@@ -166,6 +166,22 @@ def test_energy_contrib_lstsq(molecule_dataset: Sequence[jraph.GraphsTuple]):
     assert jnp.allclose(expected, contributions, atol=1e-3)
 
 
+def test_energy_contribution_lstsq_without_energies():
+    """Graphs without total energies raise `DataNotFound`, so `from_data` can skip the
+    statistic (`ignore_missing`) instead of failing on a `KeyError`."""
+    graph = jraph.GraphsTuple(
+        nodes={keys.ATOMIC_NUMBERS: np.array([[1], [8]])},
+        n_node=np.array([2]),
+        edges=None,
+        n_edge=np.array([0]),
+        globals={},
+        senders=np.zeros(0, int),
+        receivers=np.zeros(0, int),
+    )
+    with pytest.raises(reax.exceptions.DataNotFound):
+        atomic.EnergyContributionLstsq([1, 8]).create(graph)
+
+
 def test_all_atomic_numbers():
     numbers = [[1, 2, 5], [1, 5, 7], [1], [2, 9]]
 
