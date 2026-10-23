@@ -59,17 +59,35 @@ def graph_metric(
 _SPECIES_MASK: Final[str] = "_species_mask"
 
 
+def _get_or_none(graph: jraph.GraphsTuple, path) -> jax.Array | None:
+    try:
+        return _tree.get(graph, path)
+    except KeyError:
+        return None
+
+
+def _and_masks(*masks) -> jax.Array | None:
+    """Combine one-entry-per-item boolean masks, skipping the absent (``None``) ones."""
+    present = [jnp.asarray(m).astype(bool).reshape(-1) for m in masks if m is not None]
+    if not present:
+        return None
+    combined = present[0]
+    for m in present[1:]:
+        combined = jnp.logical_and(combined, m)
+    return combined
+
+
 def _with_species_mask(
-    graph: jraph.GraphsTuple, species_path, species_index: int
+    graph: jraph.GraphsTuple, species_path, species_index: int, mask_path=None
 ) -> jraph.GraphsTuple:
-    """Return ``graph`` with a boolean node mask selecting only ``species_index``."""
+    """Return ``graph`` with a boolean node mask selecting only ``species_index``, restricted
+    further to ``mask_path`` when the graph has that field."""
     species = jnp.asarray(tree.get_by_path(graph._asdict(), species_path)).reshape(-1)
     mask = species == species_index
 
     # Respect any padding mask that is already there, otherwise padded nodes get counted
-    padding = graph.nodes.get("mask")
-    if padding is not None:
-        mask = jnp.logical_and(mask, jnp.asarray(padding).reshape(-1))
+    user_mask = _get_or_none(graph, mask_path) if mask_path is not None else None
+    mask = _and_masks(mask, graph.nodes.get(keys.MASK), user_mask)
 
     nodes = dict(graph.nodes)
     nodes[_SPECIES_MASK] = mask
@@ -85,6 +103,7 @@ def species_metric(
     atomic_numbers: Sequence[int] | None = None,
     species_field: "gcnn.TreePathLike | None" = None,
     normalise_by: "gcnn.TreePathLike | None" = None,
+    mask: "gcnn.TreePathLike | None" = None,
 ) -> "GraphMetric":
     """Evaluate ``metric`` over the nodes of a single species.
 
@@ -96,6 +115,8 @@ def species_metric(
         :class:`~tensorial.gcnn.atomic.SpeciesTransform`.
     :param atomic_numbers: the type map the model was built with, used to turn an atomic number
         into a species index.
+    :param mask: a boolean node field restricting the nodes further (e.g. the atoms that carry a
+        label), combined with the species and padding masks.  Ignored for graphs without it.
     """
     if atomic_numbers is not None:
         atomic_numbers = list(atomic_numbers)
@@ -111,6 +132,7 @@ def species_metric(
     species_from = _tree.path_from_str(
         species_field if species_field is not None else f"nodes.{keys.SPECIES}"
     )
+    mask_from = _tree.path_from_str(mask) if mask is not None else None
 
     class _SpeciesMetric(GraphMetric):
         parent = reax.metrics.get(metric)
@@ -122,7 +144,7 @@ def species_metric(
         @override
         def create(self, predictions, targets=None):  # pylint: disable=arguments-differ
             return super().create(
-                _with_species_mask(predictions, species_from, species_index), targets
+                _with_species_mask(predictions, species_from, species_index, mask_from), targets
             )
 
     return _SpeciesMetric()
@@ -148,6 +170,7 @@ def species_metrics(
     species: Sequence[int] | None = None,
     species_field: "gcnn.TreePathLike | None" = None,
     normalise_by: "gcnn.TreePathLike | None" = None,
+    mask: "gcnn.TreePathLike | None" = None,
 ) -> dict[str, "GraphMetric"]:
     """Build a :func:`species_metric` for every species in the type map.
 
@@ -159,6 +182,8 @@ def species_metrics(
 
     :param atomic_numbers: the type map the model was built with.
     :param species: restrict to these atomic numbers, all of ``atomic_numbers`` if ``None``.
+    :param mask: an extra boolean node field to restrict every species to, see
+        :func:`species_metric`.
     """
     atomic_numbers = [int(z) for z in jnp.asarray(atomic_numbers).reshape(-1).tolist()]
     selected = atomic_numbers if species is None else [int(z) for z in species]
@@ -172,6 +197,7 @@ def species_metrics(
             atomic_numbers=atomic_numbers,
             species_field=species_field,
             normalise_by=normalise_by,
+            mask=mask,
         )
         for z in selected
     }
@@ -231,16 +257,13 @@ class GraphMetric(reax.Metric):
 
         mask = None
         if self.mask_key is not None:
-            if self.mask_key == "auto":
-                pred_key = _tree.path_from_str(self.pred_key)
-                mask_key = pred_key[:-1] + ("mask",)
-            else:
-                mask_key = self.mask_key
-
-            try:
-                mask = _tree.get(predictions, mask_key)
-            except KeyError:
-                mask = None
+            # The padding mask next to the predictions is always honoured; an explicit mask
+            # restricts it further, and a graph without the explicit field (e.g. a dataset whose
+            # atoms all carry a label) falls back to the padding mask alone
+            pred_key = _tree.path_from_str(self.pred_key)
+            mask = _get_or_none(predictions, pred_key[:-1] + (keys.MASK,))
+            if self.mask_key != "auto":
+                mask = _and_masks(mask, _get_or_none(predictions, self.mask_key))
 
         if self.normalise_by is not None:
             pred = mdiv(pred, _tree.get(predictions, self.normalise_by), where=mask)

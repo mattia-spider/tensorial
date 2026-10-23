@@ -326,6 +326,88 @@ def test_avg_num_neighbours_by_type_compute_empty_raises():
         metric.compute()  # pylint: disable=not-callable
 
 
+def _masked_graphs(n_graphs: int, n_nodes: int, with_active: bool = True):
+    """Batched graphs with a padding mask (`mask`) and, optionally, a label mask (`active`)."""
+    targets = np.random.random((n_graphs, n_nodes, 3))
+    preds = np.random.random((n_graphs, n_nodes, 3))
+    padding = np.random.randint(0, 2, size=(n_graphs, n_nodes), dtype=bool)
+    active = np.random.randint(0, 2, size=(n_graphs, n_nodes), dtype=bool)
+    graphs = []
+    for target, pred, pad, act in zip(targets, preds, padding, active):
+        nodes = {"target": target, "pred": pred, "mask": pad}
+        if with_active:
+            nodes["active"] = act
+        graphs.append(
+            jraph.GraphsTuple(
+                n_node=jnp.array([n_nodes]),
+                n_edge=jnp.zeros(1),
+                nodes=nodes,
+                edges={},
+                globals={},
+                senders=jnp.array([]),
+                receivers=jnp.array([]),
+            )
+        )
+    return jraph.batch(graphs), targets, preds, padding, active
+
+
+def test_graph_metric_explicit_mask_keeps_padding():
+    graphs, targets, preds, padding, active = _masked_graphs(10, 4)
+    computed = (
+        gcnn.metrics.graph_metric(
+            reax.metrics.MeanSquaredError, "nodes.pred", "nodes.target", mask="nodes.active"
+        )
+        .update(graphs)
+        .compute()
+    )
+    sel = padding & active
+    assert np.isclose(computed, optax.losses.squared_error(preds[sel], targets[sel]).mean())
+
+
+def test_graph_metric_missing_explicit_mask_falls_back_to_padding():
+    graphs, targets, preds, padding, _ = _masked_graphs(10, 4, with_active=False)
+    computed = (
+        gcnn.metrics.graph_metric(
+            reax.metrics.MeanSquaredError, "nodes.pred", "nodes.target", mask="nodes.active"
+        )
+        .update(graphs)
+        .compute()
+    )
+    assert np.isclose(computed, optax.losses.squared_error(preds[padding], targets[padding]).mean())
+
+
+def test_species_metrics_with_mask():
+    atomic_numbers = [1, 6, 8]
+    species = np.array([0, 1, 1, 2, 0, 2, 1, 0])
+    targets = np.random.random((len(species), 3))
+    preds = np.random.random((len(species), 3))
+    padding = np.array([1, 1, 1, 1, 1, 1, 1, 0], dtype=bool)
+    active = np.array([1, 0, 1, 1, 1, 0, 1, 1], dtype=bool)
+    graphs = jraph.GraphsTuple(
+        n_node=jnp.array([len(species)]),
+        n_edge=jnp.zeros(1, dtype=int),
+        nodes={
+            keys.SPECIES: species,
+            "target": targets,
+            "pred": preds,
+            "mask": padding,
+            "active": active,
+        },
+        edges={},
+        globals={},
+        senders=jnp.array([], dtype=int),
+        receivers=jnp.array([], dtype=int),
+    )
+
+    metrics = gcnn.metrics.species_metrics(
+        "rmse", "nodes.pred", atomic_numbers, "nodes.target", mask="nodes.active"
+    )
+    for idx, metric in enumerate(metrics.values()):
+        sel = (species == idx) & padding & active
+        reference = np.sqrt(((preds[sel] - targets[sel]) ** 2).mean())
+        assert np.isclose(metric.create(graphs).compute(), reference)
+
+
 def test_species_metrics():
     # Type map H, C, O -> species indices 0, 1, 2
     atomic_numbers = [1, 6, 8]
